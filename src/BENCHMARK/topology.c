@@ -372,13 +372,22 @@ hwloc_obj_t roofline_hwloc_get_under_memory(const hwloc_obj_t obj){
 hwloc_obj_t roofline_hwloc_get_next_memory(const hwloc_obj_t obj){
   hwloc_obj_t next = obj;
   /* If current_obj is not set, start from the bottom of the topology to return the first memory */
-  if(obj == NULL) next = hwloc_get_obj_inside_cpuset_by_depth(topology, root->cpuset, hwloc_topology_get_depth(topology)-1,0);
+  if(obj == NULL){
+    next = hwloc_get_obj_inside_cpuset_by_depth(topology, root->cpuset, hwloc_topology_get_depth(topology)-1,0);
+  }
+  else if(hwloc_obj_type_is_memory(obj->type)){
+    return obj->next_cousin;
+  }
+    
+  /* If obj was not a memory, then it is below memory and we return whether a cache or a memory */
+  do{
+    next=hwloc_get_obj_inside_cpuset_by_depth(topology, root->cpuset, next->depth-1, 0);
+    if(next == NULL){break;}
+    if( next->memory_arity > 0){
+      next = next->memory_first_child;
+    }
+  } while(next!=NULL && !roofline_hwloc_obj_is_memory(next));
   
-  /* If current obj is not a cache, then next memory is at same depth in root cpuset (if any) */
-  if((int)next->depth <= hwloc_get_type_depth(topology, HWLOC_OBJ_NUMANODE) && next->next_cousin != NULL) return next->next_cousin;
-  
-  /* get parent memory */
-  do{next=hwloc_get_obj_inside_cpuset_by_depth(topology, root->cpuset, next->depth-1, 0);} while(next!=NULL && !roofline_hwloc_obj_is_memory(next));
   /* If obj is a above NUMANode, then take the topology left most obj */
   if(next != NULL && (int)next->depth <= hwloc_get_type_depth(topology, HWLOC_OBJ_NUMANODE))
     next = hwloc_get_obj_by_depth(topology, next->depth, 0);

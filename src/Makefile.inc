@@ -18,7 +18,7 @@ ROOFLINE_N_SAMPLES=16
 HOST=$(shell hostname)
 
 ##Set the exact CPU frequency for better accuracy of plateform benchmark.
-CPU_FREQUENCY=$(shell awk /GHz/'{gsub("GHz", "", $$0); n = split($$0, s, " "); print s[n]*1000000000; exit}' /proc/cpuinfo)
+CPU_FREQUENCY=$(shell lscpu | awk /max/'{print $$NF*1000000}')
 
 ##Compiler informations
 CC=gcc

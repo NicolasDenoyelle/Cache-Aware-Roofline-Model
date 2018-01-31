@@ -27,7 +27,7 @@ static void usage(char * argv0){
   printf("-v, --validate: perform roofline validation checking. This will run benchmark for several operational intensity trying to hit the roofs.\n\t");
   printf("-oi, --operational-intensity: perform roofline validation checking on set operational intensity.\n\t");
   printf("-t, --type  <\"LOAD|LOAD_NT|STORE|STORE_NT|2LD1ST|MUL|ADD|MAD\">: choose the roofline types among load, load_nt, store, store_nt, or 2loads/1store for memory, add, mul, and fma for fpeak.\n\t");
-  printf("-m, --memory <hwloc_obj:id|hwloc_obj:id|...>: benchmark a single memory level.\n\t");
+  printf("-m, --memory <hwloc_obj:id|hwloc_obj:id|...>: benchmark a single or several memory level(s).\n\t");
   printf("--CARM: Build the Cache Aware Roofline Model.\n\t");
   printf("-s, --src <hwloc_ibj:idx>: Build the model with threads at leaves of src obj. Default is Node:0.\n\t");
   printf("-mat, --matrix: Benchmark bandwidth matrix at --src level.\n\t");
