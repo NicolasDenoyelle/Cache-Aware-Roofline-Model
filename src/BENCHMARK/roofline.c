@@ -93,7 +93,7 @@ static unsigned  n_parent_nodes;
   
   /* Check if cpu frequency has been defined */
 #ifndef CPU_FREQ
-  cpu_freq_str = getenv("CPU_FREQ");
+  char* cpu_freq_str = getenv("CPU_FREQ");
   if(cpu_freq_str == NULL)
     ERR_EXIT("Please define the machine cpu frequency (in Hertz) with build option CPU_FREQ or the environement variable of the same name");
   cpu_freq = atof(cpu_freq_str);
