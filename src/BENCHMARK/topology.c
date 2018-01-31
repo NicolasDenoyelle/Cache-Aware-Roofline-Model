@@ -5,6 +5,8 @@
 #include "utils.h"
 #include "MSC/MSC.h"
 
+extern unsigned NUMA_domain_depth;
+
 void roofline_hwloc_check_version(){
 #if HWLOC_API_VERSION >= 0x0020000
   /* Header uptodate for monitor */
@@ -24,37 +26,31 @@ int roofline_hwloc_get_memory_bounds(const hwloc_obj_t memory, size_t * lower, s
   hwloc_obj_t first_node = hwloc_get_obj_by_type(topology, HWLOC_OBJ_NUMANODE, 0);  
   do{ child  = roofline_hwloc_get_under_memory(child); } while(child!=NULL && child->depth <= first_node->depth);
 
-  if(child == NULL) { *lower = get_chunk_size(op_type); }
+  if(child == NULL) { child_size = get_chunk_size(op_type); }
   else{
     n_child = hwloc_get_nbobjs_inside_cpuset_by_depth(topology, memory->cpuset, child->depth);
     if(memory->depth<=first_node->depth){
       n_child = hwloc_get_nbobjs_inside_cpuset_by_depth(topology, root->cpuset, child->depth);
     }
     roofline_debug2("Memory size is between %s:%d and %s*%d(%s)\n",
-		    hwloc_type_name(memory->type), memory->logical_index,
-		    hwloc_type_name(child->type), n_child, hwloc_type_name(child->type));
+		    hwloc_obj_type_string(memory->type), memory->logical_index,
+		    hwloc_obj_type_string(child->type), n_child, hwloc_obj_type_string(child->type));
     
     child_size = roofline_hwloc_get_memory_size(child);
-    if(child_size > GB){
-      if(2*child_size*n_child<mem_size){
-	*lower = 2*child_size*n_child;
-      }
-    } else {
-      *lower = 2*child_size*n_child;
-    }    
   }
 
-  /* Set upper bound size */
+  /* Set bounds size */
+  *lower = child_size*n_child;
   *upper = mem_size;
-  
-  /* Shrink if possible to save time */
-  if(*upper>GB){
-    if(                  *upper > *lower*8){ *upper = *upper/8; }
-    else if(*lower>GB && *upper > *lower*4){ *upper = *upper/4; }    
-    else if(*lower>GB && *upper > *lower*2){ *upper = *upper/2; }
-  }
-  else if(memory->depth>first_node->depth){ *upper = *upper/2; }  
 
+  /* Set size for specific cases: */
+  
+  /* If possible, avoid limit lower bound case */
+  if(*lower *4 < (*upper)) { *lower = *lower *2; }
+
+  /* Upper bound size is greater than 1GB (slow). Try to reduce size */  
+  while(*upper > GB && *upper > 2*(*lower)) { *upper = *upper/2; }
+  
 #ifdef DEBUG2
   roofline_mkstr(target, 128);
   roofline_hwloc_obj_snprintf(memory, target, sizeof(target));
@@ -65,14 +61,14 @@ int roofline_hwloc_get_memory_bounds(const hwloc_obj_t memory, size_t * lower, s
   if(*upper<*lower){
     if(child!=NULL){
       fprintf(stderr, "%s(%ld KB) above %s(%ld KB) is not large enough to be split into %u*%ld\n", 
-	      hwloc_type_name(memory->type), (unsigned long)(*upper/1e3), 
-	      hwloc_type_name(child->type), (unsigned long)(child_size/1e3), 
+	      hwloc_obj_type_string(memory->type), (unsigned long)(*upper/1e3), 
+	      hwloc_obj_type_string(child->type), (unsigned long)(child_size/1e3), 
 	      n_child, (unsigned long)(child_size/1e3));
     }
     else{
       fprintf(stderr, "minimum chunk size(%u*%lu B) greater than memory %s size(%lu B). Skipping.\n",
-	      n_threads, get_chunk_size(op_type), 
-	      hwloc_type_name(memory->type), roofline_hwloc_get_memory_size(memory));
+	      n_child, get_chunk_size(op_type), 
+	      hwloc_obj_type_string(memory->type), roofline_hwloc_get_memory_size(memory));
     }
     return -1;
   }
@@ -116,7 +112,7 @@ hwloc_obj_t roofline_hwloc_cpubind(const hwloc_obj_type_t leaf_type){
   if(n_leaves == 0){
     roofline_mkstr(root_str, 32);
     roofline_hwloc_obj_snprintf(root, root_str, sizeof(root_str));
-    fprintf(stderr,"cpubind failed because root %s has no child %s\n", root_str, hwloc_type_name(leaf_type));
+    fprintf(stderr,"cpubind failed because root %s has no child %s\n", root_str, hwloc_obj_type_string(leaf_type));
     return NULL;
   }
   hwloc_obj_t leaf = hwloc_get_obj_inside_cpuset_by_type(topology, root->cpuset, leaf_type, tid%n_leaves);
@@ -142,32 +138,35 @@ int roofline_hwloc_check_cpubind(hwloc_cpuset_t cpuset){
 #ifdef DEBUG2
     hwloc_obj_t bound = hwloc_get_first_largest_obj_inside_cpuset(topology, checkset);
     hwloc_obj_t bind = hwloc_get_first_largest_obj_inside_cpuset(topology, cpuset);
-    hwloc_obj_t node = roofline_hwloc_local_memory();
+    hwloc_obj_t node = roofline_hwloc_local_domain();
     fprintf(stderr, "cpubind=%s:%d, bound %s:%d, node %s:%d\n",
-	   hwloc_type_name(bind->type),bind->logical_index,
-	    hwloc_type_name(bound->type),bound->logical_index,
-	    hwloc_type_name(node->type),node->logical_index);
+	   hwloc_obj_type_string(bind->type),bind->logical_index,
+	    hwloc_obj_type_string(bound->type),bound->logical_index,
+	    hwloc_obj_type_string(node->type),node->logical_index);
 #endif /* DEBUG2 */
   ret = hwloc_bitmap_isequal(cpuset,checkset);
   hwloc_bitmap_free(checkset);  
   return ret;
 }
 
-hwloc_obj_t roofline_hwloc_local_memory(){
+hwloc_obj_t roofline_hwloc_NUMA_domain(int logical_index){
+  hwloc_obj_t domain = hwloc_get_obj_by_type(topology, HWLOC_OBJ_NUMANODE, 0);  
+  do { domain = domain->parent; } while(domain && hwloc_obj_type_is_memory(domain->type));
+  while(domain && logical_index--){ domain = domain->next_cousin; }
+  return domain;
+}
+
+hwloc_obj_t roofline_hwloc_local_domain(){
   hwloc_obj_t thread_location = roofline_hwloc_get_cpubind();
   if(thread_location == NULL){
       fprintf(stderr, "largest obj in cpuset is NULL\n");
       return NULL;
-  }
-  
-  while(thread_location != NULL && (int)thread_location->depth > hwloc_get_type_depth(topology, HWLOC_OBJ_NUMANODE))
-    thread_location = thread_location->parent;
-
+  }  
+  while(thread_location && thread_location->memory_arity == 0){ thread_location = thread_location->parent; }
   if(thread_location == NULL){
       fprintf(stderr, "Thread has no parent Node\n");
       return NULL;
   }
-  
   return thread_location;
 }
 
@@ -199,24 +198,23 @@ static void roofline_check_area_membind(const hwloc_obj_t target_l, const hwloc_
   roofline_hwloc_obj_snprintf(target_l, target, sizeof(target));
   roofline_hwloc_obj_snprintf(alloc_l, area, sizeof(area));
   snprintf(source, sizeof(source), "unknown location");    
-  hwloc_obj_t from = roofline_hwloc_local_memory();
+  hwloc_obj_t from = roofline_hwloc_local_domain();
   if(from != NULL){ memset(source, 0, sizeof(source)); roofline_hwloc_obj_snprintf(from, source, sizeof(source)); }    
   printf("area allocation on %s, allocated on %s from %s\n", target, area, source);
 }
 
 hwloc_obj_t roofline_hwloc_set_area_membind(const hwloc_obj_t membind_location, void * ptr, const size_t size, LARM_policy policy){
-  hwloc_obj_t            where = NULL;  
+  hwloc_obj_t            where        = roofline_hwloc_local_domain();  
   hwloc_membind_policy_t hwloc_policy = HWLOC_MEMBIND_BIND;
-  unsigned               node_depth = hwloc_get_type_depth(topology, HWLOC_OBJ_NUMANODE);  
-  hwloc_bitmap_t         nodeset = hwloc_bitmap_alloc();
+  unsigned               NUMA_domain_depth   = hwloc_get_type_depth(topology, HWLOC_OBJ_NUMANODE);  
+  hwloc_bitmap_t         nodeset      = hwloc_bitmap_alloc();
   
-  if(membind_location == NULL || ptr == NULL){goto exit_alloc;}
-
+  if(where == NULL || membind_location == NULL || ptr == NULL){goto exit_alloc;}
   /* If their is more than one node where to bind, we have to apply user policy instead of force binding on a single node */
-  if(membind_location->depth<node_depth){
+  if(membind_location->depth<NUMA_domain_depth){
     switch(policy){
     case LARM_FIRSTTOUCH:
-      where = roofline_hwloc_local_memory();
+      where = where->memory_first_child;
       hwloc_bitmap_copy(nodeset, where->nodeset);
       break;
     case LARM_INTERLEAVE:
@@ -225,18 +223,18 @@ hwloc_obj_t roofline_hwloc_set_area_membind(const hwloc_obj_t membind_location, 
       hwloc_bitmap_copy(nodeset, where->nodeset);      
       break;
     case LARM_FIRSTTOUCH_HBM:
-      where = roofline_hwloc_local_memory();
-      while(where != NULL && (where->subtype == NULL || strcmp(where->subtype, "MCDRAM"))){where = where->next_cousin;}
+      where = where->memory_first_child;
+      do{ where = where->next_sibling; } while(where && (where->subtype == NULL || strcmp(where->subtype, "MCDRAM")));
       if(where == NULL){
 	fprintf(stderr, "No HBM found bind firsttouch DDR\n");
-        where = roofline_hwloc_local_memory();
+        where = roofline_hwloc_local_domain();
       }
       hwloc_bitmap_copy(nodeset, where->nodeset);
       break;
     case LARM_INTERLEAVE_DDR:
       hwloc_policy = HWLOC_MEMBIND_INTERLEAVE;
       where = membind_location;      
-      while(where != NULL && where->depth<node_depth){where = where->first_child;}
+      while(where != NULL && where->depth<NUMA_domain_depth){where = where->first_child;}
       while(where != NULL && hwloc_bitmap_isincluded(where->nodeset, membind_location->nodeset)){
 	if(where->subtype == NULL || strcmp(where->subtype, "MCDRAM")){
 	  hwloc_bitmap_or(nodeset, where->nodeset, nodeset);
@@ -248,7 +246,7 @@ hwloc_obj_t roofline_hwloc_set_area_membind(const hwloc_obj_t membind_location, 
     case LARM_INTERLEAVE_HBM:
       hwloc_policy = HWLOC_MEMBIND_INTERLEAVE;
       where = membind_location;      
-      while(where != NULL && where->depth<node_depth){where = where->first_child;}
+      while(where != NULL && where->depth<NUMA_domain_depth){where = where->first_child;}
       while(where != NULL && hwloc_bitmap_isincluded(where->nodeset, membind_location->nodeset)){	
 	if(where->subtype != NULL && !strcmp(where->subtype, "MCDRAM")){
 	  hwloc_bitmap_or(nodeset, where->nodeset, nodeset);
@@ -258,8 +256,8 @@ hwloc_obj_t roofline_hwloc_set_area_membind(const hwloc_obj_t membind_location, 
       where = membind_location;
       break;
     }
-  } else if(membind_location->depth>node_depth){
-    where = roofline_hwloc_local_memory();
+  } else if(membind_location->depth>NUMA_domain_depth){
+    where = roofline_hwloc_local_domain();
     hwloc_bitmap_copy(nodeset, where->nodeset);          
   } else {
     where = membind_location;
@@ -316,7 +314,11 @@ hwloc_obj_t roofline_hwloc_parse_obj(const char* arg){
   logical_index = 0;
   if(idx!=NULL) logical_index = atoi(idx);
   free(dup_arg);
-  return hwloc_get_obj_by_depth(topology,depth,logical_index);
+  hwloc_obj_t obj = hwloc_get_obj_by_depth(topology,depth,logical_index);
+  do {
+    obj = obj->parent;
+  } while(obj && hwloc_obj_type_is_memory(obj->type));
+  return obj;
 
 err_parse_obj:
   free(dup_arg);
@@ -341,7 +343,7 @@ size_t roofline_hwloc_get_memory_size(const hwloc_obj_t obj){
   if(obj==NULL)
     return 0;
   if ((int)obj->depth <= hwloc_get_type_depth(topology, HWLOC_OBJ_NUMANODE))
-    return obj->memory.total_memory;
+    return obj->total_memory;
   if(roofline_hwloc_objtype_is_cache(obj->type)){
     type = obj->attr->cache.type;
     if(type == HWLOC_OBJ_CACHE_UNIFIED || type == HWLOC_OBJ_CACHE_DATA){
@@ -355,14 +357,14 @@ size_t roofline_hwloc_get_memory_size(const hwloc_obj_t obj){
 hwloc_obj_t roofline_hwloc_get_under_memory(const hwloc_obj_t obj){
   hwloc_obj_t child = obj;
   if(obj==NULL) return NULL;
-  unsigned node_depth = hwloc_get_type_depth(topology, HWLOC_OBJ_NUMANODE);
+  unsigned NUMA_domain_depth = hwloc_get_type_depth(topology, HWLOC_OBJ_NUMANODE);
   
   /* Handle memory without child case */
   while(child != NULL && child ->arity == 0){ child = child->prev_sibling; }
   if(child == NULL){return NULL;}
   
   /* go down to the first memory */
-  do{ child = child->first_child; } while(child != NULL && (!roofline_hwloc_obj_is_memory(child) || child->depth <= node_depth));
+  do{ child = child->first_child; } while(child != NULL && (!roofline_hwloc_obj_is_memory(child) || child->depth <= NUMA_domain_depth));
   return child;
 }
 
@@ -406,27 +408,17 @@ hwloc_obj_t roofline_hwloc_next_parent_obj(hwloc_obj_t obj){
   return obj;
 }
 
-int roofline_hwloc_get_obj_id_among_parents(hwloc_obj_t obj){
-  if(obj == NULL) return -1;  
-  hwloc_obj_t first = root;
-  while(first != NULL && first->depth<obj->depth){ first = first->first_child; }
-  if(first == NULL) return -1;
-  int n = 0;  
-  while(first && first != obj){
-    if(first->arity>0){ n++; } first = first->next_cousin;
-  }
-  return n;
-}
-
 void roofline_hwloc_accumulate(hwloc_obj_t * dst, hwloc_obj_t * src){
   /* merge cpusets */
-  if((*dst) != NULL && (*src) != NULL &&
-     hwloc_bitmap_isincluded((*dst)->cpuset, (*src)->cpuset))
+  if(dst && src && *dst && *src && hwloc_bitmap_isincluded((*dst)->cpuset, (*src)->cpuset))
   {
     (*dst) = (*src);
   } else if((*dst) != NULL && (*src) != NULL){
     while((*dst) != NULL && !hwloc_bitmap_isincluded((*src)->cpuset,(*dst)->cpuset)){ (*dst) = (*dst)->parent; }
-    while((*dst) && (*dst)->parent && hwloc_bitmap_isequal((*dst)->parent->cpuset, (*dst)->cpuset)) { *dst = (*dst)->parent; } 
+    while((*dst) &&
+	  (*dst)->parent &&
+	  hwloc_bitmap_isequal((*dst)->parent->cpuset, (*dst)->cpuset) &&
+	  (*dst)->depth > NUMA_domain_depth) { *dst = (*dst)->parent; } 
   } else if((*src) != NULL){
     (*dst) = (*src);
   }

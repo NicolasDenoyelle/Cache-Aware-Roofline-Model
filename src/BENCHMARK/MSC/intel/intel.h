@@ -132,7 +132,7 @@
 #endif /* __AVX512__ */
 
 #if defined (__AVX512__)
-#define CHUNK_SIZE 1920
+#define CHUNK_SIZE 1536
 
 #define STRIDE_1  "64"
 #define STRIDE_2  "128"
@@ -167,7 +167,7 @@
 #define STRIDE_31 "1984"
 
 #elif defined (__AVX__) || defined (__AVX2__)
-#define CHUNK_SIZE 960
+#define CHUNK_SIZE 768
 
 #define STRIDE_1  "32"
 #define STRIDE_2  "64"
@@ -202,7 +202,7 @@
 #define STRIDE_31 "992"
 
 #else
-#define CHUNK_SIZE 512
+#define CHUNK_SIZE 384
 
 #define STRIDE_1  "16"
 #define STRIDE_2  "32"

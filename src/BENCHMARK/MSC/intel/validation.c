@@ -158,7 +158,8 @@ static int roofline_compile_lib(char * c_path, char* so_path){
   system(cmd);
 #endif
   memset(cmd,0,sizeof(cmd));
-  sprintf(cmd, "%s -g -fPIC -shared %s -rdynamic -o %s roofline.so %s", STRINGIFY(CC), c_path, so_path, STRINGIFY(OMP_FLAG));
+  sprintf(cmd, "%s -I%s -I%s -g -fPIC -shared %s -rdynamic -Wl,-rpath=%s -o %s -L%s -lroofline %s",
+	  STRINGIFY(CC), STRINGIFY(INCLUDE_DIR), STRINGIFY(BENCH_DIR), c_path, STRINGIFY(LIB_DIR), so_path, STRINGIFY(LIB_DIR), STRINGIFY(OMP_FLAG));
   return system(cmd);
 }
 
@@ -251,8 +252,15 @@ void * benchmark_validation(int op_type, unsigned flops, unsigned bytes){
   snprintf(tempname, sizeof(tempname), "roofline_benchmark_%s_%uB_%s_%uFlops",
 	   roofline_type_str(mem_type), bytes,
 	   roofline_type_str(flop_type), flops);
-  len = strlen(tempname)+3; c_path =  malloc(len); memset(c_path,  0, len); snprintf(c_path, len, "%s.c", tempname);
-  len = strlen(tempname)+4; so_path = malloc(len); memset(so_path, 0, len); snprintf(so_path, len, "%s.so", tempname);
+  
+  len = strlen(tempname)+5;
+  c_path =  malloc(len);
+  memset(c_path,  0, len);
+  snprintf(c_path, len, "./%s.c", tempname);
+  
+  len = strlen(tempname)+6;
+  so_path = malloc(len); memset(so_path, 0, len);
+  snprintf(so_path, len, "./%s.so", tempname);
 
   /* Generate benchmark */
   fd = open(c_path, O_WRONLY|O_CREAT, 0644);

@@ -61,7 +61,7 @@ fpeakOpt = make_option(opt_str = c("-p", "--fpeak"), type = "character", default
 
 groupOpt = make_option(opt_str = c("-g", "--group"), type = "character", default=NULL, action="store_true",
                       help = "Try to group output application points on the graph.
-Points are grouped are made such the names match until the last \"_\". Then only the suffix after \"_\" is print as a label and
+Points groups are made such the names match until the last \"_\". Then only the suffix after \"_\" is print as a label and
 the prefix is print on top axis.")
 
 statOpt = make_option(opt_str = c("-s", "--stats"), type = "logical", default=FALSE, action="store_true",
@@ -132,7 +132,7 @@ df$type=toupper(df$type)
 df$location = toupper(df$location)
 if(is.null(options$location)){
     locations = unique(df$location)
-} else{
+} else {
     locations = unlist(strsplit(toupper(options$location), split=","))
 }
 df$memory=toupper(df$memory)
@@ -163,8 +163,6 @@ if(!is.null(options$bandwidth)){
     bs = unlist(strsplit(toupper(options$bandwidth), split=","))
     for(b in bs){bandwidth_types = c(bandwidth_types, strsplit(b, split="|", fixed=T))}
 }
-
-if(is.null(options$title)){options$title=basename(options$input)}
 
 options$labels = tolower(options$labels)
 options$legend = tolower(options$legend)
@@ -307,25 +305,34 @@ lseq <- function(from=1, to=100000, length.out = 6) {
     exp(seq(log(from), log(to), length.out = length.out))
 }
 
+require(graphics)
+
 plot_bandwidths <- function(bandwidths, fpeak_max, xlim, ylim){
+    ymax=min(c(options$ymax,fpeak_max))
+    
+    print(options$ymax)
+    print(fpeak_max)
     AI = lseq(xlim[1], xlim[2], 500)
     colors=options$color:(options$color+nrow(bandwidths)-1)
     for(i in 1:nrow(bandwidths)){
         ## plot roof
         GByte.s = bandwidths$GByte.s[i]
-        GFlop.s = sapply(AI*GByte.s, min, fpeak_max)
-        plot(AI, GFlop.s, lty=1, type="l", log="xy", axes=FALSE, xlab="", ylab="", xlim=xlim, ylim=ylim, col=colors[i])
+        GFlop.s = sapply(AI*GByte.s, min, ymax)
+        AI_b= AI[GFlop.s<ymax]
+        GFlop.s = GFlop.s[GFlop.s<ymax]        
+        plot(AI_b, GFlop.s, lty=1, type="l", log="xy", axes=FALSE, xlab="", ylab="", xlim=xlim, ylim=ylim, col=colors[i])
 
         ## print label on roofs
         if(display_labels()){
-            if(fpeak_max > AI[length(AI)]*GByte.s){
+            ymax=min(c(ymax, options$ymax))
+            if(ymax > AI[length(AI)]*GByte.s){
                 ymax = AI[length(AI)]*GByte.s; xmax = AI[length(AI)]            
             } else {
-                ymax = fpeak_max; xmax = fpeak_max/GByte.s*0.9
+                xmax = ymax/GByte.s*0.9
             }
             ##Compute label positions
             if(GByte.s*AI[1] > ylim[1]){ xmin = AI[1]; ymin = GByte.s*AI[1] } else { ymin = ylim[1]; xmin = ymin/GByte.s }
-            if(options$labels == "left"){ x=xmin; y=ymin*1.1; pos=4 } else { x=xmax; y=ymax; pos=2 }
+            if(options$labels == "left"){ x=xmin; y=ymin*1.3; pos=4 } else { x=xmax; y=ymax; pos=2 }
 
             ##compute angle
             label = sprintf("%s_%s", bandwidths$obj[i], bandwidths$type[i])
@@ -355,8 +362,8 @@ plot_bandwidths <- function(bandwidths, fpeak_max, xlim, ylim){
             sd = bandwidths$sd[i]
             a0.x = AI[1];                  a0.y = AI[1]*(GByte.s-sd*0.5)
             a1.x = AI[1];                  a1.y = AI[1]*(GByte.s+sd*0.5)
-            a2.x = fpeak_max/(GByte.s+sd*0.5); a2.y = fpeak_max
-            a3.x = fpeak_max/(GByte.s-sd*0.5); a3.y = fpeak_max
+            a2.x = ymax/(GByte.s+sd*0.5); a2.y = ymax
+            a3.x = ymax/(GByte.s-sd*0.5); a3.y = ymax
             coord.x = c(a0.x, a1.x, a2.x, a3.x)
             coord.y = c(a0.y, a1.y, a2.y, a3.y)
             par(new=TRUE)            
@@ -384,7 +391,7 @@ plot_bandwidths <- function(bandwidths, fpeak_max, xlim, ylim){
 plot_fpeaks <- function(fpeaks, xmin){
     for(i in 1:nrow(fpeaks)){
         abline(h = fpeaks$GFlop.s[i], lty=3, lwd=1.5, col="darkgrey");
-        text(x=xmin, y=fpeaks$GFlop.s[i], labels=fpeaks$type[i], pos=1, cex=.7*options$cex, col="darkgrey")
+        text(x=xmin, y=fpeaks$GFlop.s[i], labels=fpeaks$type[i], adj=c(0,1), cex=.7*options$cex, col="darkgrey")
         par(new=T)
     }
 }
@@ -446,7 +453,7 @@ plot_data <-function(pts, xlim, ylim, col=1, labels=NULL, rot=0){
     ##             xlim=xlim,
     ##             ylim=ylim, lwd=.5)
     ## }
-
+    
     ##plot labels
     if(is.null(labels) || length(labels) != nrow(pts)){
         labels = pts$info
@@ -455,7 +462,6 @@ plot_data <-function(pts, xlim, ylim, col=1, labels=NULL, rot=0){
     }
     if(nrow(pts) > 1){ ylab_coord = label_Ycoords(pts,ylim,40) } else { ylab_coord = pts$GFlop.s }
     text(pts$AI, ylab_coord,  labels=labels, cex=.6*options$cex, col="black", pos=2, srt=0)
-    
     par(new=T)    
 }
 
@@ -488,20 +494,20 @@ plot_data_group <- function(pts, xlim, ylim, col){
                cex=.7*options$cex)
     }
     
-    if(xlim[2]>2*xlim[1]){
-        ticks = which(abs(log(AIs,2) - round(log(AIs,2))) > 0.1)
-        if(length(ticks) > 0){
-            axis(1, labels=FALSE, at=AIs[ticks])        
-            text(x=AIs[ticks],
-                 y=10^(par("usr")[3]),
-                 pos=1,
-                 xpd=NA,
-                 labels=sprintf("%.3f      ",AIs[ticks]),
-                 srt=45,
-                 cex=.9*options$cex,
-                 offset=1)
-        }
-    }
+    ## if(xlim[2]>2*xlim[1]){
+    ##     ticks = which(abs(log(AIs,2) - round(log(AIs,2))) > 0.1)
+    ##     if(length(ticks) > 0){
+    ##         axis(1, labels=FALSE, at=AIs[ticks])        
+    ##         text(x=AIs[ticks],
+    ##              y=10^(par("usr")[3]),
+    ##              pos=1,
+    ##              xpd=NA,
+    ##              labels=sprintf("%.3f      ",AIs[ticks]),
+    ##              srt=45,
+    ##              cex=.9*options$cex,
+    ##              offset=1)
+    ##     }
+    ## }
     
     if(length(which(!remove))>0){ plot_data(pts[-remove,], xlim, ylim, col=length(groups)+1) }
 }
@@ -517,23 +523,23 @@ roofline_plot <- function(df, location, bandwidths, fpeaks, validation=F, data=N
         xticks = seq(xmin, xmax, (xmax-xmin)/10)
         xlabels = sapply(xticks, function(i) sprintf("%.3f", i))
     }
+
+    ##Set ymax bounds
     fpeak_max = max(fpeaks$GFlop.s)
     if(options$ymax<=0){
-        ymax = min(c(fpeak_max, max(bandwidths$GByte.s)*xmax))
-    } else {
-        ymax = options$ymax
+        options$ymax <<- min(c(fpeak_max, max(bandwidths$GByte.s)*xmax))
     }
-##    ymax = 10^ceiling(log10(fpeak_max))
-    ymin = options$ymin; ylim = c(ymin,ymax)
+##    options$ymax = 10^ceiling(log10(fpeak_max))
+    ymin = options$ymin; ylim = c(ymin,options$ymax)
     
     ytick_min = 10^ceiling(log10(ymin))
     if(abs( log10(ytick_min) - log10(ymin) ) < 0.1){ytick_min = ytick_min *10}
-    ytick_max = 10^floor(log10(ymax))
+    ytick_max = 10^floor(log10(options$ymax))
     pow_ticks = lseq(ytick_min, ytick_max, log10(ytick_max/ytick_min)+1)
-    yticks    = unlist(c(ymin, pow_ticks, ymax))
+    yticks    = unlist(c(ymin, pow_ticks, options$ymax))
     ylabels   = unlist(c(sprintf("%.2f", ymin),
                          sapply(pow_ticks, function(i) as.expression(bquote(10^ .(round(log10(i)))))),
-                         sprintf("%.2f", ymax)))
+                         sprintf("%.2f", options$ymax)))
         
     ##Plot grid
     plot(1, type="n", axes=F, xlab="", ylab="", xlim=xlim, ylim=ylim, log="xy")
@@ -622,16 +628,24 @@ outer=TRUE
 nr = 1
 nc = length(locations)
 layout(matrix(1:(nr*nc), nrow=nr, ncol=nc))
-par(oma=c(3,6,2,0), mar=c(1,0,4,1))
+bom=3; lom=5; tom=2; rom=0
+tim=1; bim=1; lim=0; rim=0
+par(oma=c(bom,lom,tom,rom), mar=c(bim,lim,tim,rim))
 
-if(length(locations) == 1 && options$nosubtitle){
-    outer=FALSE
-    if(nchar(options$title)>0){
-        par(oma=c(3,5.5,1,0), mar=c(1,0,4,1))
-        options$title = NULL
+if(length(locations) == 1){
+    if(options$nosubtitle){
+        outer=FALSE
+        if(is.null(options$title)){
+            tom=0; bom=2.8; lom=6.2; tim=0; rim=0.1
+            par(oma=c(bom,lom,tom,rom), mar=c(bim,lim,tim,rim))
+        } else {
+            tom=1;
+            par(oma=c(bom,lom,tom,rom), mar=c(bim,lim,tim,rim))
+        }
     } else {
-        par(oma=c(3,5.5,0,0), mar=c(1,0,0,1))
-    }
+        lom=5.7; tom=0.5; rom=0.1
+        par(oma=c(bom,lom,tom,rom), mar=c(bim,lim,tim,rim))
+    }    
 }
 
 for(i in 1:length(locations)){
@@ -652,6 +666,7 @@ for(i in 1:length(locations)){
                   plotx=plotx,
                   ploty=ploty)
 }
+
 
 title(main=options$title, outer=outer, cex.main=1.1*options$cex)
 title(xlab="Flops/Byte", ylab="GFlop/s\n\n", outer=TRUE, cex.lab=options$cex, mgp=c(1.5,0,3))

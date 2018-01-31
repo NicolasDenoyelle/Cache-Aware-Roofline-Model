@@ -13,10 +13,10 @@ float            cpu_freq = 0;               /* In Hz */
 unsigned         n_threads = 1;              /* The number of threads for benchmark */
 unsigned int     roofline_types;             /* What rooflines do we want in byte array */
 hwloc_obj_t      root;                       /* The root of topology to select the amount of threads */
+unsigned         NUMA_domain_depth;                 /* Depth of first HWLOC_OBJ_NUMANODE */
 
 static LARM_policy policy;                   /* The data allocation policy when target memory is larger than one node */ 
 static hwloc_obj_type_t leaf_type;
-static unsigned  node_depth;
 static unsigned  n_parent_nodes;
 
 #if defined(_OPENMP)
@@ -31,8 +31,6 @@ static unsigned  n_parent_nodes;
 			LARM_policy p)
 #endif
 {
-  char * cpu_freq_str;
- 
   /* Check hwloc version */
   roofline_hwloc_check_version();
 
@@ -51,7 +49,9 @@ static unsigned  n_parent_nodes;
   }
     
   /* Get first node and number of threads */
-  if(threads_location == NULL){root = hwloc_get_obj_by_type(topology, HWLOC_OBJ_NUMANODE, 0);}
+  if(threads_location == NULL){
+    root = hwloc_get_obj_by_depth(topology, HWLOC_TYPE_DEPTH_NUMANODE, 0);
+  }
   else{
     root = roofline_hwloc_parse_obj(threads_location);
     if(root == NULL){goto lib_err_with_topology;}
@@ -84,9 +84,9 @@ static unsigned  n_parent_nodes;
   }
   alignement = L1->attr->cache.linesize;
 
-  /* Save some other topological variables for later use */
-  node_depth = hwloc_get_type_depth(topology, HWLOC_OBJ_NUMANODE);
-  n_parent_nodes = roofline_hwloc_nb_parent_objs_by_depth(node_depth);
+  /* Save some other topological variables for later use */  
+  NUMA_domain_depth = roofline_hwloc_NUMA_domain(0)->depth;
+  n_parent_nodes    = roofline_hwloc_nb_parent_objs_by_depth(NUMA_domain_depth);
 
   /* Set allocation policy */
   policy = p;
@@ -115,33 +115,31 @@ inline void roofline_lib_finalize(void)
 
 
 static unsigned roofline_get_nb_outputs(){
-  if(root->depth>=node_depth){ return 1; }
-  return roofline_hwloc_nb_parent_objs_by_depth(node_depth);
+  if(root->depth>=NUMA_domain_depth){ return 1; }
+  return roofline_hwloc_nb_parent_objs_by_depth(NUMA_domain_depth);
 }
 
 static roofline_output roofline_get_local_output(roofline_output outputs){
   roofline_output ret = outputs;
 #pragma omp critical
   {
-    if(root->depth<node_depth){
-      hwloc_obj_t local_memory = roofline_hwloc_local_memory();  
-      if(local_memory == NULL){ goto return_self; }
-      int nid = roofline_hwloc_get_obj_id_among_parents(local_memory);
-      if(nid<0){ goto return_self; }
-      ret = outputs+nid;
+    if(root->depth<NUMA_domain_depth){
+      hwloc_obj_t local_domain = roofline_hwloc_local_domain();  
+      ret = outputs+local_domain->logical_index;
     } else { goto return_self; }
   return_self:;
   }
   return ret;
 }
+
 static roofline_output roofline_setup_output(){
-  unsigned i, n = roofline_get_nb_outputs();
+  unsigned i, n = roofline_get_nb_outputs(); //number of numanodes in root
   roofline_output out;
   roofline_alloc(out, sizeof(struct roofline_output_s)*n);
   for(i=0;i<n; i++){
     roofline_output_clear(out+i);
     out[i].mem_location = NULL;
-    out[i].thr_location = NULL;      
+    out[i].thr_location = hwloc_get_obj_by_type(topology, HWLOC_OBJ_NUMANODE, i);      
   }
   return out;
 }
@@ -167,7 +165,7 @@ void roofline_fpeak(FILE * output, int op_type)
 #endif  
     int i;
     hwloc_obj_t binding = roofline_hwloc_cpubind(leaf_type);
-    roofline_output local_out = new_roofline_output(binding, NULL);
+    roofline_output local_out  = new_roofline_output(binding, NULL);
     roofline_output global_out = roofline_get_local_output(out);
     
     for(i=0; i<ROOFLINE_N_SAMPLES; i++){
@@ -202,7 +200,7 @@ static void roofline_memory(FILE * output, const hwloc_obj_t memory, const int o
   static int stop = 0;
   unsigned n_leaves = hwloc_get_nbobjs_inside_cpuset_by_type(topology, memory->cpuset, leaf_type);
   n_leaves = roofline_MIN(n_leaves, n_threads);
-  if(memory->depth<=node_depth){ n_leaves = roofline_MAX(n_leaves, n_threads); }
+  if(memory->depth<=NUMA_domain_depth){ n_leaves = roofline_MAX(n_leaves, n_threads); }
     
   /* Generate samples size */
   int n_sizes = ROOFLINE_N_SAMPLES;
@@ -227,6 +225,7 @@ static void roofline_memory(FILE * output, const hwloc_obj_t memory, const int o
     /* Bind the threads */
     hwloc_obj_t thr_loc = roofline_hwloc_cpubind(leaf_type);
     if(thr_loc == NULL){ ERR("Thread binding failed"); stop = 1; }
+    
 #ifdef _OPENMP
 #pragma omp barrier
 #endif
@@ -235,7 +234,7 @@ static void roofline_memory(FILE * output, const hwloc_obj_t memory, const int o
     /*Initialize IO */    
     roofline_stream src        = new_roofline_stream(up_size, op_type);
     hwloc_obj_t mem_loc        = roofline_hwloc_set_area_membind(memory, src->stream, src->alloc_size, policy);
-    roofline_output local_out  = new_roofline_output(thr_loc, memory->depth<node_depth?mem_loc:memory);
+    roofline_output local_out  = new_roofline_output(thr_loc, memory->depth<NUMA_domain_depth?mem_loc:memory);
     roofline_output global_out = roofline_get_local_output(out);
     
     /* measure for several sizes inside bounds */
@@ -255,25 +254,25 @@ static void roofline_memory(FILE * output, const hwloc_obj_t memory, const int o
 	  roofline_debug2("size = %luGB per thread, %luGB total per %s of size %luGB\n",
 			  sizes[i]/GB,
 			  sizes[i]*n_leaves/GB,
-			  hwloc_type_name(memory->type),
+			  hwloc_obj_type_string(memory->type),
 			  roofline_hwloc_get_memory_size(memory)/GB);
 	else if(sizes[i]>MB)
 	  roofline_debug2("size = %luMB per thread, %luMB total per %s of size %luMB\n",
 			  sizes[i]/MB,
 			  sizes[i]*n_leaves/MB,
-			  hwloc_type_name(memory->type),
+			  hwloc_obj_type_string(memory->type),
 			  roofline_hwloc_get_memory_size(memory)/MB);	
 	else if(sizes[i]>KB)
 	  roofline_debug2("size = %luKB per thread, %luKB total per %s of size %luKB\n",
 			  sizes[i]/KB,
 			  sizes[i]*n_leaves/KB,
-			  hwloc_type_name(memory->type),
+			  hwloc_obj_type_string(memory->type),
 			  roofline_hwloc_get_memory_size(memory)/KB);
 	else
 	  roofline_debug2("size = %luB per thread, %luB total per %s of size %luB\n",
 			  sizes[i],
 			  sizes[i]*n_leaves,
-			  hwloc_type_name(memory->type),
+			  hwloc_obj_type_string(memory->type),
 			  roofline_hwloc_get_memory_size(memory));
 #endif
 #ifdef _OPENMP

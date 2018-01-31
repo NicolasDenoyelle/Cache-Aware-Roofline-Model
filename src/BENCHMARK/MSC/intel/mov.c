@@ -26,12 +26,7 @@
   op1(STRIDE_21,reg,REG_21)			\
   op1(STRIDE_22,reg,REG_22)			\
   op2(STRIDE_23,reg,REG_23)			\
-  op1(STRIDE_24,reg,REG_24)			\
-  op1(STRIDE_25,reg,REG_25)			\
-  op2(STRIDE_26,reg,REG_26)			\
-  op1(STRIDE_27,reg,REG_27)			\
-  op1(STRIDE_28,reg,REG_28)			\
-  op2(STRIDE_29,reg,REG_29)
+  op1(STRIDE_24,reg,REG_24)
 
 #define asm_benchmark_mov(repeat, data, out, op1, op2, op_str) do{	\
   zero_simd();								\

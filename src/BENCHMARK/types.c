@@ -84,16 +84,16 @@ unsigned roofline_filter_types(hwloc_obj_t obj, int type){
   int obj_type = 0;
   
   if(obj->type == HWLOC_OBJ_L1CACHE){
-    if(type & ROOFLINE_LOAD_NT) fprintf(stderr, "skip load_nt type not meaningful for %s\n", hwloc_type_name(obj->type));
-    if(type & ROOFLINE_STORE_NT) fprintf(stderr, "skip store_nt type not meaningful for %s\n", hwloc_type_name(obj->type));
+    if(type & ROOFLINE_LOAD_NT) fprintf(stderr, "skip load_nt type not meaningful for %s\n", hwloc_obj_type_string(obj->type));
+    if(type & ROOFLINE_STORE_NT) fprintf(stderr, "skip store_nt type not meaningful for %s\n", hwloc_obj_type_string(obj->type));
     obj_type = type & CACHE_possible;
   }    
   else if(obj->type == HWLOC_OBJ_L2CACHE ||
 	  obj->type == HWLOC_OBJ_L3CACHE ||
 	  obj->type == HWLOC_OBJ_L4CACHE ||
 	  obj->type == HWLOC_OBJ_L5CACHE){
-    if(type & ROOFLINE_LOAD_NT) fprintf(stderr, "skip load_nt type not meaningful for %s\n", hwloc_type_name(obj->type));
-    if(type & ROOFLINE_STORE_NT) fprintf(stderr, "skip store_nt type not meaningful for %s\n", hwloc_type_name(obj->type));
+    if(type & ROOFLINE_LOAD_NT) fprintf(stderr, "skip load_nt type not meaningful for %s\n", hwloc_obj_type_string(obj->type));
+    if(type & ROOFLINE_STORE_NT) fprintf(stderr, "skip store_nt type not meaningful for %s\n", hwloc_obj_type_string(obj->type));
     obj_type = type & CACHE_possible;
   }
   else if((int)obj->depth <= hwloc_get_type_depth(topology, HWLOC_OBJ_NUMANODE)){

@@ -18,6 +18,8 @@ static char *        thread_location = "Node:0"; /* Threads location */
 static int           matrix = 0;         /* Do we benchmark matrix ? */
 static LARM_policy   policy = LARM_FIRSTTOUCH;
 
+extern unsigned      NUMA_domain_depth; //defined in roofline.c, gives the depth of HWLOC_OBJ_NUMANODE
+
 static void usage(char * argv0){
   printf("%s <options...>\n\n", argv0);
   printf("OPTIONS:\n\t");
@@ -193,7 +195,7 @@ int main(int argc, char * argv[]){
   /* roofline every memory obj */
   if(mem == NULL){
     hwloc_obj_t memory = NULL;
-    while((memory = roofline_hwloc_get_next_memory(memory)) != NULL){
+    while((memory = roofline_hwloc_get_next_memory(memory)) != NULL && memory->depth >= NUMA_domain_depth){
       bench_memory(out, memory);
     }
   }

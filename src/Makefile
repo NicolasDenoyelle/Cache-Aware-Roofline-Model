@@ -1,76 +1,72 @@
-#############################################################################################
-#                                      Configuration                                        #
-#############################################################################################
-#Number of samples per memory.
-N_SAMPLES=16
-#Use PAPI and compile tool for code sampling
-PAPI=no
-# Benchmark for intel plateform
-MSC=intel
+include Makefile.inc
 
-#############################################################################################
-#                                              BUILD                                        #
-#############################################################################################
-export CC=gcc
-export OMP_FLAG= #-fopenmp
-export CFLAGS= -g \
-	-DROOFLINE_MIN_DUR=$(LAST)\
-	-DROOFLINE_N_SAMPLES=$(N_SAMPLES)\
-	-DCC=$(CC)\
-	-DOMP_FLAG=$(OMP_FLAG)
+TARGET=benchmark profile
+INSTALL=benchmark_install profile_install
+UNINSTALL=benchmark_uninstall profile_uninstall
+CLEAN=benchmark_clean profile_clean
 
-LDFLAGS=-ldl -lhwloc -lm $(OMP_FLAG)
-
-ifdef DEBUG
-CFLAGS+=-Wall -Werror -Wextra -DDEBUG2 -DDEBUG1
+ifdef PIN_ROOT
+TARGET+=pintool
+INSTALL+=pintool_install
+UNINSTALL+=pintool_uninstall
+CLEAN+=pintool_clean
 endif
 
-SRC=stream.c output.c types.c stats.c topology.c roofline.c list.c
-OBJ=$(patsubst %.c, %.o, $(SRC)) MSC/$(MSC)/MSC.a
-PREFIX=$(HOME)/local
-BIN=roofline
-SO=roofline.so
-LIB=librfsampling.so
-LIB_DEFINE=
-LIB_LDFLAGS=-lrt -lhwloc $(OMP_FLAG)
+all: $(TARGET)
 
-.PHONY: all install uninstall clean
+build_dirs: $(RES_DIR) $(BIN_DIR) $(LIB_DIR) $(HEADER_DIR)
 
-ifeq (yes, $(PAPI))
-LIB_DEFINE=-D_PAPI_
-LIB_LDFLAGS+=-lpapi
-endif
+install: $(TARGET) build_dirs $(INSTALL)
+	@cp SCRIPTS/CARMPlot.R $(BIN_DIR)
+	chmod +x $(BIN_DIR)/CARMPlot.R
+	@cp SCRIPTS/CARMModel.sh $(BIN_DIR)
+	sed -i "s/BIN_DIR/$(shell echo $(BIN_DIR) | sed -e 's/[\/]/\\\//g')/" $(BIN_DIR)/CARMModel.sh
+	sed -i "s/LIB_DIR/$(shell echo $(LIB_DIR) | sed -e 's/[\/]/\\\//g')/" $(BIN_DIR)/CARMModel.sh
+	sed -i "s/RES_DIR/$(shell echo $(RES_DIR) | sed -e 's/[\/]/\\\//g')/" $(BIN_DIR)/CARMModel.sh
+	sed -i "s/PIN_ROOT/$(shell echo $(PIN_ROOT) | sed -e 's/[\/]/\\\//g')/" $(BIN_DIR)/CARMModel.sh
+	chmod +x $(BIN_DIR)/CARMModel.sh
 
-all: $(BIN) $(SO) $(LIB)
+uninstall: $(UNINSTALL)
 
-%.o: %.c
-	$(CC) $(CFLAGS) -c -o $@ $^ $(OMP_FLAG) -fPIC
+clean: $(CLEAN)
 
-MSC/$(MSC)/MSC.a: MSC/$(MSC)/*.c
-	make -C MSC/$(MSC)
+$(RES_DIR): 
+	@mkdir $@
 
-$(BIN): main.c $(OBJ)
-	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+$(BIN_DIR): 
+	@mkdir $@
 
-$(SO): $(OBJ)
-	$(CC) $(CFLAGS) -fPIC -shared $^ -o $@ $(LDFLAGS)
+$(LIB_DIR): 
+	@mkdir $@
 
-$(LIB): sampling.c list.o
-	$(CC) $(CFLAGS) $(LIB_DEFINE) -fPIC -shared $^ -o $@ $(LIB_LDFLAGS)
+$(HEADER_DIR): 
+	@mkdir $@
 
-test: test_sampling.c $(LIB)
-	$(CC) $(CFLAGS) $< -o $@ -lrfsampling
-	./$@
+benchmark:
+	make -C BENCHMARK
+benchmark_install:
+	make -C BENCHMARK install
+benchmark_uninstall:
+	make -C BENCHMARK uninstall
+benchmark_clean:
+	make -C BENCHMARK clean
 
-install:
-	cp sampling.h $(PREFIX)/include/
-	cp $(LIB) $(PREFIX)/lib/
-	cp $(BIN) $(PREFIX)/bin/
+profile:
+	make -C PROFILE
+profile_install:
+	make -C PROFILE install
+profile_uninstall:
+	make -C PROFILE uninstall
+profile_clean:
+	make -C PROFILE clean
 
-uninstall:
-	rm $(PREFIX)/include/sampling.h $(PREFIX)/lib/$(LIB) $(PREFIX)/bin/$(BIN)
+pintool:
+	make -C PINTOOL
+pintool_install:
+	make -C PINTOOL install
+pintool_uninstall:
+	make -C PINTOOL uninstall
+pintool_clean:
+	make -C PINTOOL clean
 
-clean:
-	rm -f *.o *.s *.so roofline
-	make -C MSC/$(MSC) clean
 
